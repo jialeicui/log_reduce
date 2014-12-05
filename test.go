@@ -1,13 +1,20 @@
 package main
 
 import (
+	"bufio"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
+type proc_log func(line string)
+
+// 处理时间
 func deal_time(lhs, rhs string) int64 {
 	l, _ := time.LoadLocation("Local")
 	time_str := lhs + " " + rhs
@@ -17,6 +24,7 @@ func deal_time(lhs, rhs string) int64 {
 	return t.Unix()
 }
 
+// ip to int
 func inet_aton(ipnr net.IP) int {
 	bits := strings.Split(ipnr.String(), ".")
 
@@ -35,6 +43,7 @@ func inet_aton(ipnr net.IP) int {
 	return sum
 }
 
+// 处理ip和端口
 func deal_ip_port(ip_port string) (int, int) {
 	ip_port = strings.Trim(ip_port, ":")
 	ip_port = strings.Replace(ip_port, "#", ":", 1)
@@ -45,11 +54,67 @@ func deal_ip_port(ip_port string) (int, int) {
 	return inet_aton(ip_o), port
 }
 
+func deal_view(view string) int {
+	// 后期需要从数据库中查找
+	view = strings.Trim(view, ":")
+	return math.MaxInt32
+}
+
+func deal_query(query string) int32 {
+	// 后期需要从数据库中查找
+	s := strings.Split(query, ":")
+	query = s[1]
+	return math.MaxInt32
+}
+
+func foreach_line(filename string, proc_func proc_log) {
+	file, err := os.Open(filename)
+	if err != nil {
+		fmt.Print(err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		proc_func(scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Print(err)
+		return
+	}
+}
+
 func main() {
-	line := "[2014-12-04 13:27:54.758 LEVEL = QUERY] client 61.220.4.123#63013: view chunghwa-telecom: query:int.dpool.sina.com.cn. IN 1"
-	depart := strings.Split(line, " ")
-	t := deal_time(depart[0], depart[1])
-	a, p := deal_ip_port(depart[6])
-	_ = t
-	fmt.Print(a, p)
+	// open output file
+	fo, err := os.Create("output.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer fo.Close()
+
+	proc_one_line := func(line string) {
+		depart := strings.Split(line, " ")
+		t := deal_time(depart[0], depart[1])
+		ip, port := deal_ip_port(depart[6])
+		view := deal_view(depart[8])
+		domain := deal_query(depart[9])
+		qtype, _ := strconv.Atoi(depart[11])
+		if false {
+			res := fmt.Sprintf("%v,%v,%v,%v,%v,%v\n", t, ip, port, view, domain, qtype)
+			fo.WriteString(res)
+		} else {
+			// 由于binary.Write需要明确长度的值,所以这里需要进行int的转换
+			var data = []interface{}{t, int32(ip), int32(port), int32(view), int32(domain), int32(qtype)}
+			for _, v := range data {
+				err := binary.Write(fo, binary.LittleEndian, v)
+				if err != nil {
+					fmt.Println("binary.Write failed:", err)
+				}
+			}
+		}
+	}
+
+	foreach_line("log", proc_one_line)
 }
